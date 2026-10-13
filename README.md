@@ -19,9 +19,11 @@
 - 30 / 45 / 60 分钟模拟面试、独立代码草稿、刷新恢复、评分报告。
 - 浏览器 Web Worker 内运行 Python + NumPy：10 秒执行超时、保留已完成测试、自动恢复、加载阶段取消和超时保护。
 - 手机 / 桌面、深色 / 浅色 / 系统主题、减少动效、键盘操作。
-- 本地账号注册与登录、游客模式、独立存档、首个账号认领游客进度、完整 JSON 导入导出。
+- ChatGPT 云端登录、跨设备自动同步、断网续学、冲突处理、游客与旧本机存档迁移、完整 JSON 导入导出。
 
-本地账号仅用于当前浏览器中的学习存档，使用带随机盐的 PBKDF2-SHA256 保存密码校验值。学习数据不加密，不会自动云同步。换设备或清理浏览器前，请导出备份；备份包含进度、草稿、面试历史与进行中的面试，不含账号密码。
+登录同一个 ChatGPT 账号后，学习进度、草稿、复习记录、设置和模拟面试保存在云端。游客与旧本机账号仍可离线学习；到「我的 → 云端账号与存档」选择旧存档或 JSON 备份，即可迁移。迁移会先确认替换范围，并保留本机原件与恢复版本。
+
+云端写入采用版本校验；两台设备同时修改时会显示两份存档，供下载和选择，不会静默覆盖。网络中断或登录过期时，未同步修改保存在当前设备，恢复连接后继续同步。学习记录按登录身份隔离，每份云存档上限 1.5 MB（UTF-8）；超限时会保留本地数据并提示精简草稿。
 
 ## 本地运行
 
@@ -30,6 +32,8 @@
 ```bash
 npm ci
 npm run fetch:pyodide
+npm run build
+# 首次本地开发：按 docs/CLOUD.md 应用本地数据库迁移
 npm run dev
 ```
 
@@ -47,19 +51,22 @@ npm run build
 真实 Chrome 回归（先启动 `npm run dev -- --host 127.0.0.1 --port 5173`）：
 
 ```bash
+npm run test:cloud
+npm run test:cloud:e2e
 npm run test:platform
 npm run test:level -- --base http://127.0.0.1:5173
 ```
 
-这两组测试分别覆盖账号隔离与备份、模拟面试和运行器异常恢复，以及完整闯关流程、真实判题、等价答案与超时恢复。测试使用本机 Chrome，不会下载浏览器。
+这些回归覆盖云端账号隔离、并发与断网恢复、本地迁移、模拟面试和运行器异常恢复，以及完整闯关流程与真实判题。浏览器测试使用本机 Chrome，不会下载浏览器。
 
 ## 部署与维护
 
-`dist/` 为纯静态产物，使用相对资源路径与 HashRouter。支持 Sites、GitHub Pages、Vercel 或 Nginx。Sites 项目标识保存在 `.openai/hosting.json`，再次发布应更新同一站点。
+`dist/server` 是 Cloudflare Worker，`dist/client` 是课程与 Python 静态资源。云端版本需要 Sites 身份注入与 D1 数据库，不能只上传静态目录。Sites 项目标识与 DB 绑定保存在 `.openai/hosting.json`，再次发布应更新同一站点。原有 HashRouter 关卡链接保持有效。
 
 - [产品与技术设计](docs/DESIGN.md)
 - [完整课程大纲](docs/SYLLABUS.md)
 - [内容写作规范](docs/AUTHORING.md)
 - [实现与验收进度](docs/PROGRESS.md)
+- [云端存档设计与开发](docs/CLOUD.md)
 
 `node_modules`、`public/pyodide`、`dist` 和测试截图均不提交。Python 参考解与跟练由浏览器和校验脚本共用的 harness 执行；新增课程必须通过内容校验和 Python 测试。

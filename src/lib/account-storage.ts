@@ -1,4 +1,8 @@
 /** Account selection is tab-local; learning data and accounts persist on this device. */
+let storageAccountId: string | null | undefined
+export function isCloudStorageActive() { return storageAccountId?.startsWith('cloud:') ?? false }
+export let accountStorageGeneration = 0
+export function setStorageAccountId(id: string | null) { storageAccountId = id; accountStorageGeneration++ }
 export let accountSwitchInProgress = false
 export function setAccountSwitching(value: boolean) { accountSwitchInProgress = value }
 
@@ -11,5 +15,6 @@ export function currentAccountId(): string | null {
 }
 
 export function accountKey(base: string, id = currentAccountId()) {
-  return id ? `${base}::${id}` : base
+  const selected = arguments.length > 1 ? id : storageAccountId ?? id
+  return selected ? `${base}::${selected}` : base
 }

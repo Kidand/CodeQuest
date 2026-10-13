@@ -11,7 +11,9 @@ import { TRACK_META, TRACKS, answerAccuracy, challengesPassed, chapterStats, hea
 import { ACHIEVEMENTS, achievementProgress, useAchievementCtx } from '@/lib/achievements'
 import { useMock } from '@/lib/mock'
 import { switchAccount, useAccount } from '@/lib/accounts'
+import { cloudStatusText, useCloud, migrateCloudSnapshot, parseCloudBackup, markCloudDirty } from '@/lib/cloud'
 import { cn } from '@/lib/utils'
+import { setAccountSwitching } from '@/lib/account-storage'
 import { Button, Card, Segmented, Slider, Switch } from '@/components/ui'
 import { PageSpinner } from '@/components/PageSpinner'
 import { ChapterIcon } from '@/components/ChapterIcon'
@@ -50,13 +52,14 @@ export default function Profile() {
 
 function AccountCard() {
   const account = useAccount((s) => s.account)
+  const cloud = useCloud()
   return <Card className="flex flex-wrap items-center gap-4 p-5">
     <div className="min-w-0 flex-1">
-      <h2 className="font-semibold">{account ? `你好，${account.username}` : '正在使用游客存档'}</h2>
-      <p className="mt-1 text-xs leading-6 text-muted">本机保存 · 每个账号拥有独立进度、草稿和面试记录 · 换设备请导出备份</p>
+      <h2 className="font-semibold">{cloud.user ? `你好，${cloud.user.username || cloud.user.email || '学习者'}` : account ? `本机账号：${account.username}` : '正在使用游客存档'}</h2>
+      <p className="mt-1 text-xs leading-6 text-muted">{cloud.user ? `${cloudStatusText[cloud.status]} · 同一账号可在不同设备继续学习` : '本机进度已保留 · 登录云端后可迁移并自动同步'}</p>
     </div>
-    <Link to="/account" className="rounded-xl bg-accent-soft px-4 py-2.5 text-sm font-semibold text-accent">{account ? '切换账号' : '登录 / 注册'}</Link>
-    {account && <Button variant="ghost" onClick={() => void switchAccount(null)}>退出登录</Button>}
+    <Link to="/account" className="rounded-xl bg-accent-soft px-4 py-2.5 text-sm font-semibold text-accent">{cloud.user ? '云端账号与存档' : '登录云端 / 迁移存档'}</Link>
+    {!cloud.user && account && <Button variant="ghost" onClick={() => void switchAccount(null)}>退出本机账号</Button>}
   </Card>
 }
 
@@ -366,6 +369,7 @@ function SettingsCard() {
 }
 
 function DataCard() {
+  const cloudUser = useCloud((s) => s.user)
   const resetAll = useProgress((s) => s.resetAll)
   const clearMock = useMock((s) => s.clearHistory)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -400,7 +404,7 @@ function DataCard() {
     <section>
       <SectionTitle>数据</SectionTitle>
       <Card className="p-5">
-        <p className="text-[13px] leading-relaxed text-muted">进度只保存在本浏览器（localStorage）。换设备或清理浏览器数据前，请先导出备份。</p>
+        <p className="text-[13px] leading-relaxed text-muted">{cloudUser ? '登录后的进度自动同步到云端，本机保留离线副本。也可以导出完整备份；导入或重置会同步到当前云端账号。' : '当前使用本机存档。到「云端账号与存档」登录并迁移后，可在不同设备继续学习。清理浏览器数据前请先导出备份。'}</p>
         <div className="mt-4 flex flex-wrap gap-2">
           <Button variant="secondary" icon={<Download size={15} />} onClick={doExport}>
             导出进度
@@ -427,11 +431,14 @@ function DataCard() {
         confirmLabel="确认重置"
         onCancel={() => setConfirm(null)}
         onConfirm={() => {
-          resetAll()
-          clearMock()
-          useMock.getState().discard()
-          useDrafts.setState({ drafts: {} })
-          useEvents.getState().clear()
+          setAccountSwitching(true)
+          try {
+            resetAll()
+            clearMock()
+            useMock.getState().discard()
+            useDrafts.setState({ drafts: {} })
+            useEvents.getState().clear()
+          } finally { setAccountSwitching(false); markCloudDirty() }
           setConfirm(null)
           setMsg({ ok: true, text: '进度已重置（设置保留）。' })
         }}
@@ -443,10 +450,11 @@ function DataCard() {
         title="导入并覆盖当前进度？"
         confirmLabel="导入"
         onCancel={() => setConfirm(null)}
-        onConfirm={() => {
+        onConfirm={async () => {
           if (typeof confirm !== 'object' || !confirm) return
           try {
-            importBackup(confirm.json)
+            if (cloudUser) await migrateCloudSnapshot(parseCloudBackup(confirm.json))
+            else importBackup(confirm.json)
             setMsg({ ok: true, text: `已从 ${confirm.name} 导入进度。` })
           } catch (e) {
             setMsg({ ok: false, text: String((e as Error)?.message ?? e) })
@@ -454,7 +462,7 @@ function DataCard() {
           setConfirm(null)
         }}
       >
-        将用「{typeof confirm === 'object' && confirm ? confirm.name : ''}」中的进度覆盖当前数据。
+        将用「{typeof confirm === 'object' && confirm ? confirm.name : ''}」中的进度覆盖当前数据。{cloudUser && '这也会替换当前云端账号的存档，其他设备下一次同步后会更新。'}
       </ConfirmDialog>
     </section>
   )

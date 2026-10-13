@@ -17,7 +17,14 @@ await page.addInitScript(() => {
 const errors = []
 page.on('pageerror', (e) => errors.push(e.message))
 await fs.mkdir('.shots/platform', { recursive: true })
-const goto = async (path) => { await page.goto(`${base}/#${path}`); await page.locator('main').first().waitFor() }
+const goto = async (path) => {
+  await page.goto(`${base}/#${path}`)
+  await page.locator('main').first().waitFor()
+  if (path === '/account') {
+    const details = page.locator('details').filter({ hasText: '打开旧本机账号 / 使用游客存档' })
+    if (!await details.evaluate(el => el.open)) await details.locator('summary').click()
+  }
+}
 const read = () => page.evaluate(async () => {
   const { useProgress, useDrafts } = await window.__cqImport('/src/lib/store.ts')
   const { useMock } = await window.__cqImport('/src/lib/mock.ts')
@@ -30,7 +37,7 @@ async function register(name) {
   await page.getByLabel('密码', { exact: true }).fill('test-password-123')
   await page.getByLabel('确认密码', { exact: true }).fill('test-password-123')
   await page.getByRole('button', { name: '创建账号，开始闯关', exact: true }).click()
-  await page.getByRole('heading', { name: `你好，${name}` }).waitFor()
+  await page.getByRole('heading', { name: `本机账号：${name}` }).waitFor()
 }
 try {
   await goto('/account')
@@ -45,10 +52,10 @@ try {
   assert.equal(first.drafts['guest-sample'], '# retained guest draft')
   assert.ok(first.id)
   assert.ok(!await page.evaluate(() => localStorage.getItem('cq-accounts').includes('test-password-123')))
-  await page.getByRole('button', { name: '退出登录', exact: true }).click()
+  await page.getByRole('button', { name: '退出本机账号', exact: true }).click()
   await page.getByRole('heading', { name: '正在使用游客存档' }).waitFor()
-  assert.equal((await read()).xp, 0)
-  assert.deepEqual((await read()).drafts, {})
+  assert.equal((await read()).xp, 42)
+  assert.equal((await read()).drafts['guest-sample'], '# retained guest draft')
   await register('测试玩家乙')
   assert.equal((await read()).xp, 0)
   assert.deepEqual((await read()).drafts, {})
@@ -60,11 +67,11 @@ try {
   await page.getByRole('alert').filter({ hasText: '用户名或密码不正确' }).waitFor()
   await page.getByLabel('密码', { exact: true }).fill('test-password-123')
   await page.getByRole('button', { name: '登录并继续学习', exact: true }).click()
-  await page.getByRole('heading', { name: '你好，测试玩家甲' }).waitFor()
+  await page.getByRole('heading', { name: '本机账号：测试玩家甲' }).waitFor()
   assert.equal((await read()).id, first.id)
   assert.equal((await read()).xp, 42)
   await page.reload()
-  await page.getByRole('heading', { name: '你好，测试玩家甲' }).waitFor()
+  await page.getByRole('heading', { name: '本机账号：测试玩家甲' }).waitFor()
   assert.equal((await read()).drafts['guest-sample'], '# retained guest draft')
   console.log('✓ 注册、PBKDF2 非明文存储、游客认领、错误密码、双账号隔离、刷新恢复')
 

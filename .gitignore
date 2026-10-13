@@ -8,3 +8,6 @@ public/pyodide/
 output/playwright/
 .sites-runtime/
 *.tar.gz
+.wrangler/
+.env*
+!.env.example

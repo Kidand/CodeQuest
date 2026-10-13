@@ -1,7 +1,7 @@
 {
   "name": "codequest",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "CodeQuest — 大模型算法工程师面试闯关学习站",
   "scripts": {
@@ -14,7 +14,11 @@
     "shot": "node scripts/shot.mjs",
     "fetch:pyodide": "node scripts/fetch-pyodide.mjs",
     "test:platform": "node scripts/e2e/platform-e2e.mjs",
-    "test:level": "node --import tsx scripts/e2e/level-e2e.ts"
+    "test:level": "node --import tsx scripts/e2e/level-e2e.ts",
+    "db:generate": "drizzle-kit generate",
+    "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
+    "test:cloud": "node --import tsx scripts/test-cloud.ts",
+    "test:cloud:e2e": "node scripts/e2e/cloud-e2e.mjs"
   },
   "dependencies": {
     "@codemirror/lang-python": "^6.2.1",
@@ -38,7 +42,8 @@
     "rehype-katex": "^7.0.1",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "zustand": "^5.0.15"
+    "zustand": "^5.0.15",
+    "drizzle-orm": "0.45.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
@@ -52,6 +57,10 @@
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "vite": "^8.3.4"
+    "vite": "^8.3.4",
+    "@cloudflare/vite-plugin": "1.63.2",
+    "@cloudflare/workers-types": "5.20261013.1",
+    "drizzle-kit": "0.31.10",
+    "wrangler": "4.150.0"
   }
 }

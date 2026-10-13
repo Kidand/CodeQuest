@@ -335,9 +335,9 @@ export function useAchievementWatcher() {
     loadCatalog().then((c) => {
       if (!alive) return
       cat = c
-      check()
     })
-    check()
+    // Loading a cloud archive or switching accounts must not mutate that archive.
+    // Evaluate achievements only after a subsequent learning or interview action.
     const u1 = useProgress.subscribe(check)
     const u2 = useMock.subscribe(check)
     return () => {

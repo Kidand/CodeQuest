@@ -128,3 +128,10 @@
 ## 8. 部署
 
 `npm run fetch:pyodide && npm run build` 后，`dist/` 是纯静态站点，可以直接放到 GitHub Pages / Vercel / Nginx。`public/pyodide/` 已在 .gitignore 中，构建前由脚本从 `node_modules/pyodide` 复制并下载 numpy wheel。
+
+
+## 9. 云端存档扩展（v1.1）
+
+部署升级为 Vite React SPA + Cloudflare Worker API + D1。保留 HashRouter 和全部课程；静态资源位于 dist/client，服务端位于 dist/server。原仅本机账号方案继续作为游客和迁移来源，默认的跨设备身份改为 Sites ChatGPT 登录。
+
+完整存档按服务器认证的用户 ID 隔离；客户端单路自动保存、版本检查与幂等请求防止静默丢失。离线日志按账号和每个文档的 writer ID 保存，云加载不会额外发放奖励。多设备冲突时保留两份快照，由用户明确选择；本地迁移复制原件，不自动合并 XP。身份、接口、迁移与测试约定见 [CLOUD.md](CLOUD.md)。
