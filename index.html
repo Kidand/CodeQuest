@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7f7fb" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0d0e14" media="(prefers-color-scheme: dark)" />
+    <meta name="description" content="CodeQuest：像闯关一样准备大模型算法工程师面试——可视化图解、随堂练习、代码跟练与浏览器内实战手撕。" />
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <title>CodeQuest · 大模型算法面试闯关</title>
+    <script>
+      // 首屏前应用主题，避免闪烁。与 src/lib/theme.ts 保持一致。
+      (function () {
+        try {
+          var t = localStorage.getItem('cq-theme') || 'system';
+          var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.toggle('dark', dark);
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

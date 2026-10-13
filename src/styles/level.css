@@ -1,0 +1,156 @@
+/* ============================================================
+ * 关卡页（P2）专用样式。颜色一律来自 index.css 的语义 token。
+ * 由 LevelPage / QuestionView / ChallengeWorkspace 引入（Vite 会去重）。
+ * ============================================================ */
+
+/* 代码缩进参考线（代码拼图 / 跟练） */
+.cq-indent {
+  display: inline-block;
+  align-self: stretch;
+  background-image: repeating-linear-gradient(
+    to right,
+    color-mix(in oklab, var(--border-strong) 80%, transparent) 0 1px,
+    transparent 1px 4ch
+  );
+  background-position: 0.35ch 0;
+  opacity: 0.8;
+}
+
+/* 随堂练习：手机端把题目操作栏固定在屏幕底部 */
+@media (max-width: 767px) {
+  .cq-qv-sticky .cq-qv-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    padding-bottom: calc(0.75rem + env(safe-area-inset-bottom));
+    box-shadow: 0 -6px 16px -10px rgba(0, 0, 0, 0.25);
+  }
+}
+
+/* 跟练：内联输入框 */
+.cq-blank {
+  font: inherit;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+  padding: 0 0.4ch;
+  margin: 0 0.1ch;
+  border-radius: 6px;
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--fg);
+  outline: none;
+  vertical-align: baseline;
+  min-width: 6ch;
+  max-width: 100%;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.cq-blank:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+.cq-blank[data-state='wrong'] {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.cq-blank-done {
+  border-radius: 5px;
+  padding: 0 0.3ch;
+  margin: 0 0.1ch;
+  cursor: pointer;
+  border-bottom: 2px solid var(--success);
+  background: color-mix(in oklab, var(--success) 12%, transparent);
+}
+.cq-blank-done[data-kind='equivalent'] {
+  border-bottom-color: var(--info);
+  background: color-mix(in oklab, var(--info) 12%, transparent);
+}
+.cq-blank-done[data-kind='revealed'] {
+  border-bottom-color: var(--warning);
+  background: color-mix(in oklab, var(--warning) 12%, transparent);
+}
+.cq-blank-todo {
+  display: inline-block;
+  min-width: 5ch;
+  padding: 0 0.6ch;
+  margin: 0 0.1ch;
+  border-radius: 5px;
+  border: 1.5px dashed var(--border-strong);
+  color: var(--subtle);
+  text-align: center;
+  line-height: 1.35;
+}
+
+/* 当前步所在行 */
+.cq-line-current {
+  background: var(--line-active);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+/* 面试追问闪卡翻面 */
+.cq-flip {
+  perspective: 1400px;
+}
+.cq-flip-inner {
+  display: grid;
+  transform-style: preserve-3d;
+  transition: transform 0.5s cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+.cq-flip-inner > * {
+  grid-area: 1 / 1;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.cq-flip-back {
+  transform: rotateY(180deg);
+}
+.cq-flip[data-flipped='true'] .cq-flip-inner {
+  transform: rotateY(180deg);
+}
+
+/* 图解：阅读进度条 */
+.cq-progress-bar {
+  transform-origin: left center;
+  transition: transform 0.15s linear;
+}
+
+/* 星星点亮 */
+@keyframes cq-star-in {
+  0% { transform: scale(0.2) rotate(-40deg); opacity: 0; }
+  60% { transform: scale(1.25) rotate(8deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); opacity: 1; }
+}
+.cq-star-in {
+  animation: cq-star-in 0.55s cubic-bezier(0.3, 1.4, 0.5, 1) both;
+}
+
+/* XP 浮层 */
+@keyframes cq-float-up {
+  0% { transform: translateY(8px); opacity: 0; }
+  15% { transform: translateY(0); opacity: 1; }
+  80% { transform: translateY(-4px); opacity: 1; }
+  100% { transform: translateY(-14px); opacity: 0; }
+}
+.cq-float-up {
+  animation: cq-float-up 1.8s ease-out both;
+}
+
+/* 抽屉 / 对话框 */
+@keyframes cq-slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes cq-slide-in-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@keyframes cq-zoom-in {
+  from { transform: scale(0.94); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.cq-drawer-right { animation: cq-slide-in-right 0.25s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cq-drawer-up { animation: cq-slide-in-up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.cq-zoom-in { animation: cq-zoom-in 0.2s ease-out; }
+
+/* CodeMirror 容器 */
+.cq-editor .cm-editor { height: 100%; }
+.cq-editor .cm-scroller { overflow: auto; }

@@ -1,0 +1,76 @@
+import { defineChapter, md } from '@/content/helpers'
+
+export default defineChapter({
+  id: 'algo-sort',
+  track: 'algo',
+  order: 2,
+  title: '排序与选择',
+  subtitle: '快排 · 归并 · 堆与 Top-K · 快速选择 · 线性排序',
+  icon: 'ArrowUpDown',
+  prerequisites: ['algo-search'],
+  intro: md`
+    “手撕快排”和“第 K 大”是大模型岗手撕环节出现率最高的题目之一。本章把四类核心技术讲透：
+    **快排的划分与退化**、**归并的分治与逆序对**、**堆的 sift 操作与 Top-K**、**快速选择与线性时间排序**。
+    大模型推理中的 top-k 采样、beam search、MoE 路由，本质上都是“选出最大的 k 个”。
+  `,
+  levels: [
+    {
+      id: 'algo-sort-quick',
+      title: '快速排序',
+      summary: 'Lomuto / Hoare / 三路划分、随机 pivot、最坏 O(n²) 的成因、栈深度优化与稳定性',
+      difficulty: 3,
+      estMinutes: 45,
+      tier: 'must',
+      tags: ['快排', '划分', '三路划分', '荷兰国旗'],
+      problems: ['LC 912 排序数组（手撕快排）', 'LC 75 颜色分类'],
+      load: () => import('./levels/quick'),
+    },
+    {
+      id: 'algo-sort-heap',
+      title: '堆与 Top-K',
+      summary: '数组 ↔ 完全二叉树、sift up / down、O(n) 建堆、heapq 用法、Top-K 与两个堆求中位数',
+      difficulty: 3,
+      estMinutes: 50,
+      tier: 'must',
+      tags: ['堆', 'heapq', 'Top-K', '优先队列'],
+      problems: ['LC 215 数组中的第 K 个最大元素', 'LC 347 前 K 个高频元素', 'LC 23 合并 K 个升序链表', 'LC 295 数据流的中位数'],
+      llmLink: 'top-k 采样、beam search 维护候选、MoE top-k 路由（GPU 上用 radix select 而非堆）',
+      load: () => import('./levels/heap'),
+    },
+    {
+      id: 'algo-sort-select',
+      title: '快速选择与线性排序',
+      summary: 'quickselect 期望 O(n) 与最坏情况、比较排序下界、计数 / 基数 / 桶排序、复杂度与稳定性总表',
+      difficulty: 3,
+      estMinutes: 45,
+      tier: 'must',
+      tags: ['快速选择', '计数排序', '基数排序', '桶'],
+      problems: ['LC 215 数组中的第 K 个最大元素', 'LC 164 最大间距'],
+      llmLink: '从 logits 取 top-k 下标：np.argpartition（introselect，期望 O(V)）比 argsort 全排序快',
+      load: () => import('./levels/select'),
+    },
+    {
+      id: 'algo-sort-merge',
+      title: '归并排序',
+      summary: '分治与 O(n log n) 的来源、稳定合并、逆序对计数、自底向上与链表归并、外部排序',
+      difficulty: 3,
+      estMinutes: 45,
+      tier: 'high',
+      tags: ['归并排序', '分治', '逆序对', '链表'],
+      problems: ['LC 912 排序数组（归并）', 'LC 148 排序链表', '剑指 Offer 51 数组中的逆序对'],
+      load: () => import('./levels/merge'),
+    },
+    {
+      id: 'algo-sort-boss',
+      title: 'BOSS：排序综合',
+      summary: '全章复盘（各算法比较次数对照）+ LC23 合并 K 个升序链表 + LC315 计算右侧小于当前元素的个数',
+      kind: 'boss',
+      difficulty: 4,
+      estMinutes: 60,
+      tier: 'high',
+      tags: ['排序', '堆', '归并', '综合'],
+      problems: ['LC 23 合并 K 个升序链表', 'LC 315 计算右侧小于当前元素的个数'],
+      load: () => import('./levels/boss'),
+    },
+  ],
+})

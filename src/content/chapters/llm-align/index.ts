@@ -1,0 +1,93 @@
+import { defineChapter, md } from '@/content/helpers'
+
+export default defineChapter({
+  id: 'llm-align',
+  track: 'llm',
+  order: 8,
+  title: '后训练与偏好对齐',
+  subtitle: 'SFT · 奖励模型 · PPO-RLHF · DPO · IPO/SimPO/KTO/ORPO',
+  icon: 'HeartHandshake',
+  prerequisites: ['llm-basics'],
+  intro: md`
+    预训练模型会续写，但不会“好好回答问题”。后训练分两步：**SFT** 教会它对话格式与基本能力，**偏好对齐**让它的回答更符合人类偏好。
+    本章沿着 InstructGPT 的经典流水线（SFT → 奖励模型 → PPO）走一遍，再推导把后两步合成一个分类损失的 **DPO**，最后对比 IPO、SimPO、KTO、ORPO 等变体。
+
+    面试里最常考的手撕：**SFT 的 labels 掩码与 packing**、**Bradley-Terry 损失**、**GAE 与 PPO clipped loss**、**由 logits 算 DPO loss**；
+    最常考的推导：**DPO 从闭式解到损失函数**。推理模型的 RLVR（GRPO、DAPO、GSPO…）在下一章「推理强化学习」。
+  `,
+  levels: [
+    {
+      id: 'llm-align-sft',
+      title: 'SFT',
+      summary: 'chat template、只在 assistant 回复上算 loss、多轮掩码与 shift、packing 的位置重置与注意力隔离、token / 样本平均',
+      difficulty: 3,
+      estMinutes: 50,
+      tier: 'foundation',
+      frequency: 'high',
+      tags: ['SFT', 'loss mask', 'packing', 'chat template'],
+      problems: ['构造多轮 SFT labels', '带 ignore_index 的 SFT loss', 'packing 的 position_ids / cu_seqlens'],
+      load: () => import('./levels/sft'),
+    },
+    {
+      id: 'llm-align-rm',
+      title: '奖励模型',
+      summary: 'Bradley-Terry 推导与损失、margin、K 路排序、ORM vs PRM、生成式 RM 与 LLM-as-a-Judge 偏差、reward hacking',
+      difficulty: 3,
+      estMinutes: 50,
+      tier: 'foundation',
+      frequency: 'medium',
+      tags: ['奖励模型', 'Bradley-Terry', 'PRM', 'LLM-as-a-Judge', 'reward hacking'],
+      problems: ['BT loss 与梯度', 'RM 取最后有效 token 打分', 'K 路排序损失'],
+      load: () => import('./levels/rm'),
+    },
+    {
+      id: 'llm-align-ppo',
+      title: 'PPO 与 RLHF',
+      summary: '四个模型与显存账本、逐 token KL 奖励塑形、GAE 的 γ 与 λ、clipped surrogate 的零梯度区、value clip',
+      difficulty: 4,
+      estMinutes: 60,
+      tier: 'foundation',
+      frequency: 'high',
+      tags: ['PPO', 'RLHF', 'GAE', 'KL 惩罚', 'clip'],
+      problems: ['手撕 GAE', 'RLHF 奖励塑形 + 批量 GAE', '手撕 PPO loss（policy + value clip）'],
+      load: () => import('./levels/ppo'),
+    },
+    {
+      id: 'llm-align-dpo',
+      title: 'DPO',
+      summary: '从 KL 约束奖励最大化的闭式解推到 DPO loss：Z(x) 如何消掉、隐式奖励、β、带 mask 的序列 log-prob',
+      difficulty: 4,
+      estMinutes: 60,
+      tier: 'modern',
+      frequency: 'high',
+      tags: ['DPO', '隐式奖励', 'Bradley-Terry', 'KL 约束'],
+      problems: ['推导 DPO loss', '由 logits 手撕 dpo_loss', 'DPO 对 logits 的梯度'],
+      load: () => import('./levels/dpo'),
+    },
+    {
+      id: 'llm-align-variants',
+      title: 'DPO 变体',
+      summary: 'IPO 的有限目标 margin、SimPO 的长度归一化与 γ、KTO 的前景理论与 z₀、ORPO 的 odds ratio、online / iterative DPO',
+      difficulty: 4,
+      estMinutes: 55,
+      tier: 'modern',
+      frequency: 'medium',
+      tags: ['IPO', 'SimPO', 'KTO', 'ORPO', 'online DPO'],
+      problems: ['手写 SimPO loss', '手写 IPO / ORPO loss', '手写 KTO loss'],
+      load: () => import('./levels/variants'),
+    },
+    {
+      id: 'llm-align-boss',
+      title: 'BOSS：对齐综合',
+      summary: '复盘 SFT → RM → PPO → DPO 及变体；综合手撕：一次 PPO 更新的全部数值、统一的偏好损失族',
+      kind: 'boss',
+      difficulty: 5,
+      estMinutes: 70,
+      tier: 'modern',
+      frequency: 'high',
+      tags: ['综合', 'PPO', 'DPO', 'SimPO', 'IPO'],
+      problems: ['PPO make_experience + loss 全流程', 'DPO / cDPO / IPO / ln-DPO / SimPO 统一实现'],
+      load: () => import('./levels/boss'),
+    },
+  ],
+})

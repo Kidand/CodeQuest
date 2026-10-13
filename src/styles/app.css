@@ -1,0 +1,168 @@
+/* ============================================================
+ * 平台壳层样式（P1）。只使用 index.css 中的语义 token，
+ * 以及由 token 派生的变量（color-mix），不硬编码颜色。
+ * ============================================================ */
+
+:root {
+  /* 「更暗的那一端」：浅色主题为前景色，深色主题为背景色。用于按钮立体底边等需要“压暗”的地方 */
+  --shade: var(--fg);
+  --app-sidebar: 248px;
+}
+.dark {
+  --shade: var(--bg);
+}
+
+/* ---------- 高对比度的着色文字：把语义色向前景色混合，明暗主题下都达到 AA ---------- */
+.ink-accent { color: color-mix(in oklab, var(--accent) 78%, var(--fg)); }
+.ink-success { color: color-mix(in oklab, var(--success) 70%, var(--fg)); }
+.ink-warning { color: color-mix(in oklab, var(--warning) 66%, var(--fg)); }
+.ink-danger { color: color-mix(in oklab, var(--danger) 74%, var(--fg)); }
+.ink-info { color: color-mix(in oklab, var(--info) 76%, var(--fg)); }
+.ink-algo { color: color-mix(in oklab, var(--algo) 72%, var(--fg)); }
+.ink-llm { color: color-mix(in oklab, var(--llm) 78%, var(--fg)); }
+.ink-gold { color: color-mix(in oklab, var(--gold) 62%, var(--fg)); }
+
+/* ---------- 路线主题：在容器上设置 --track / --track-soft ---------- */
+.track-algo { --track: var(--algo); --track-soft: var(--algo-soft); }
+.track-llm { --track: var(--llm); --track-soft: var(--llm-soft); }
+.text-track { color: var(--track); }
+.ink-track { color: color-mix(in oklab, var(--track) 74%, var(--fg)); }
+.bg-track { background-color: var(--track); }
+.bg-track-soft { background-color: var(--track-soft); }
+.border-track { border-color: var(--track); }
+
+/* ---------- 地图节点（Duolingo 式立体圆钮） ---------- */
+.cq-node {
+  --node: var(--track, var(--accent));
+  --node-ledge: color-mix(in oklab, var(--node) 62%, var(--shade));
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.cq-node[data-state='cleared'],
+.cq-node[data-state='current'],
+.cq-node[data-state='available'] {
+  background: var(--node);
+  color: var(--accent-fg);
+  box-shadow: 0 6px 0 0 var(--node-ledge);
+}
+.dark .cq-node[data-state='cleared'],
+.dark .cq-node[data-state='current'],
+.dark .cq-node[data-state='available'] {
+  color: var(--bg);
+}
+.cq-node[data-state='available'] {
+  background: color-mix(in oklab, var(--node) 22%, var(--surface));
+  color: var(--node);
+  box-shadow: 0 6px 0 0 color-mix(in oklab, var(--node) 38%, var(--border-strong)), inset 0 0 0 3px var(--node);
+}
+.dark .cq-node[data-state='available'] { color: var(--node); }
+.cq-node[data-state='locked'] {
+  background: var(--surface-3);
+  color: var(--subtle);
+  box-shadow: 0 6px 0 0 var(--border-strong);
+}
+.cq-node:not([data-state='locked']):hover { filter: brightness(1.06); }
+.cq-node:active { transform: translateY(4px); box-shadow: 0 2px 0 0 var(--node-ledge); }
+.cq-node[data-state='locked']:active { box-shadow: 0 2px 0 0 var(--border-strong); }
+.cq-node[data-dim='true'] { opacity: 0.28; filter: saturate(0.4); }
+.cq-node[data-selected='true'] { outline: 3px solid var(--ring); outline-offset: 4px; }
+
+/* 当前关卡的呼吸光环 */
+.cq-node-halo {
+  position: absolute;
+  inset: -10px;
+  border-radius: 999px;
+  border: 3px solid color-mix(in oklab, var(--node) 55%, transparent);
+  animation: cq-halo 1.8s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes cq-halo {
+  0% { transform: scale(0.88); opacity: 0.9; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+
+/* 「从这里开始」气泡 */
+.cq-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 14px);
+  transform: translateX(-50%);
+  white-space: nowrap;
+  border-radius: 12px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  background: var(--surface);
+  color: var(--track, var(--accent));
+  border: 2px solid var(--border);
+  box-shadow: var(--sh-sm);
+  animation: cq-bob 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+.cq-bubble::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 10px;
+  height: 10px;
+  background: var(--surface);
+  border-right: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
+  transform: translate(-50%, -5px) rotate(45deg);
+}
+@keyframes cq-bob {
+  0%, 100% { transform: translate(-50%, 0); }
+  50% { transform: translate(-50%, -4px); }
+}
+
+/* 路径连线 */
+.cq-path-done { stroke: var(--track, var(--accent)); }
+.cq-path-todo { stroke: var(--border-strong); }
+
+/* ---------- 活动热力图 ---------- */
+.heat-cell { border-radius: 3px; background: var(--surface-2); outline: 1px solid color-mix(in oklab, var(--border) 70%, transparent); outline-offset: -1px; }
+.heat-cell[data-level='1'] { background: color-mix(in oklab, var(--heat) 28%, var(--surface-2)); outline-color: transparent; }
+.heat-cell[data-level='2'] { background: color-mix(in oklab, var(--heat) 52%, var(--surface-2)); outline-color: transparent; }
+.heat-cell[data-level='3'] { background: color-mix(in oklab, var(--heat) 76%, var(--surface-2)); outline-color: transparent; }
+.heat-cell[data-level='4'] { background: var(--heat); outline-color: transparent; }
+.heat-cell[data-level='-1'] { background: transparent; outline-color: transparent; }
+.heat-cell[data-today='true'] { outline: 2px solid var(--fg); outline-offset: -1px; }
+
+/* ---------- 进度条 ---------- */
+.cq-bar { position: relative; height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; }
+.cq-bar > i { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--bar, var(--accent)); transition: width 0.5s ease; }
+
+/* ---------- 闪卡翻面 ---------- */
+.cq-flip { perspective: 1400px; }
+.cq-flip-inner { position: relative; transition: transform 0.5s cubic-bezier(0.2, 0.7, 0.2, 1); transform-style: preserve-3d; }
+.cq-flip[data-flipped='true'] .cq-flip-inner { transform: rotateY(180deg); }
+.cq-flip-face { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+.cq-flip-back { position: absolute; inset: 0; transform: rotateY(180deg); overflow: auto; }
+
+/* ---------- 命令面板高亮 ---------- */
+.cq-mark { background: color-mix(in oklab, var(--accent) 22%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+
+/* ---------- 移动端：给底部 Tab 留空间 ---------- */
+.app-main-pad { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
+@media (min-width: 768px) {
+  .app-main-pad { padding-bottom: 48px; }
+}
+
+/* ---------- 打印（速查手册） ---------- */
+/* 打印前 AppLayout 会临时切到浅色主题（beforeprint / afterprint），这里只处理版式 */
+@media print {
+  html, body { background: var(--surface) !important; }
+  .no-print, .app-chrome { display: none !important; }
+  .app-shell { display: block !important; }
+  .app-main-pad { padding: 0 !important; }
+  .print-break-avoid { break-inside: avoid; page-break-inside: avoid; }
+  .print-full { max-width: none !important; width: 100% !important; margin: 0 !important; padding: 0 !important; }
+  .print-shadow-none { box-shadow: none !important; }
+  a { color: inherit !important; text-decoration: none !important; }
+}

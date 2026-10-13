@@ -1,0 +1,10 @@
+node_modules
+dist
+.DS_Store
+*.local
+public/pyodide/
+.shots/
+.vite*
+output/playwright/
+.sites-runtime/
+*.tar.gz
