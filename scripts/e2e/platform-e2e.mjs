@@ -2,6 +2,7 @@
 import { chromium } from 'playwright-core'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
+import { pbkdf2Sync, randomBytes } from 'node:crypto'
 
 const base = process.env.CQ_TEST_BASE || 'http://127.0.0.1:5173'
 const browser = await chromium.launch({ channel: 'chrome', args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] })
@@ -30,50 +31,60 @@ const read = () => page.evaluate(async () => {
   const { useMock } = await window.__cqImport('/src/lib/mock.ts')
   return { xp: useProgress.getState().xp, drafts: useDrafts.getState().drafts, mock: useMock.getState().active, id: sessionStorage.getItem('cq-session'), achievements: useProgress.getState().achievements }
 })
-async function register(name) {
+async function loginLegacy(name, password) {
   await goto('/account')
-  await page.getByRole('radio', { name: '注册本机账号', exact: true }).click()
-  await page.getByLabel('用户名', { exact: true }).fill(name)
-  await page.getByLabel('密码', { exact: true }).fill('test-password-123')
-  await page.getByLabel('确认密码', { exact: true }).fill('test-password-123')
-  await page.getByRole('button', { name: '创建账号，开始闯关', exact: true }).click()
+  await page.locator('#local-username').fill(name)
+  await page.locator('#local-password').fill(password)
+  await page.getByRole('button', { name: '打开旧本机账号', exact: true }).click()
   await page.getByRole('heading', { name: `本机账号：${name}` }).waitFor()
 }
 try {
+  const localPassword = randomBytes(24).toString('base64url')
+  const localAccounts = ['测试玩家甲', '测试玩家乙'].map((username, i) => {
+    const salt = randomBytes(16).toString('hex')
+    return { id: `legacy-platform-${i}`, username, salt, hash: pbkdf2Sync(localPassword, salt, 600_000, 32, 'sha256').toString('hex'), iterations: 600_000, createdAt: new Date().toISOString() }
+  })
   await goto('/account')
   await page.evaluate(async () => {
     const { useProgress, useDrafts } = await window.__cqImport('/src/lib/store.ts')
     useProgress.setState({ xp: 42 })
     useDrafts.getState().setDraft('guest-sample', '# retained guest draft')
   })
-  await register('测试玩家甲')
+  await page.evaluate(accounts => {
+    localStorage.setItem('cq-accounts', JSON.stringify(accounts))
+    for (const key of ['cq-progress', 'cq-drafts', 'cq-mock']) {
+      const value = localStorage.getItem(key)
+      if (value) localStorage.setItem(`${key}::${accounts[0].id}`, value)
+    }
+  }, localAccounts)
+  await loginLegacy('测试玩家甲', localPassword)
   const first = await read()
   assert.equal(first.xp, 42)
   assert.equal(first.drafts['guest-sample'], '# retained guest draft')
   assert.ok(first.id)
-  assert.ok(!await page.evaluate(() => localStorage.getItem('cq-accounts').includes('test-password-123')))
+  assert.ok(!await page.evaluate(password => localStorage.getItem('cq-accounts').includes(password), localPassword))
   await page.getByRole('button', { name: '退出本机账号', exact: true }).click()
   await page.getByRole('heading', { name: '正在使用游客存档' }).waitFor()
   assert.equal((await read()).xp, 42)
   assert.equal((await read()).drafts['guest-sample'], '# retained guest draft')
-  await register('测试玩家乙')
+  await loginLegacy('测试玩家乙', localPassword)
   assert.equal((await read()).xp, 0)
   assert.deepEqual((await read()).drafts, {})
   assert.deepEqual((await read()).achievements, {})
   await goto('/account')
-  await page.getByLabel('用户名', { exact: true }).fill('测试玩家甲')
-  await page.getByLabel('密码', { exact: true }).fill('wrong-password')
-  await page.getByRole('button', { name: '登录并继续学习', exact: true }).click()
+  await page.locator('#local-username').fill('测试玩家甲')
+  await page.locator('#local-password').fill('wrong-password')
+  await page.getByRole('button', { name: '打开旧本机账号', exact: true }).click()
   await page.getByRole('alert').filter({ hasText: '用户名或密码不正确' }).waitFor()
-  await page.getByLabel('密码', { exact: true }).fill('test-password-123')
-  await page.getByRole('button', { name: '登录并继续学习', exact: true }).click()
+  await page.locator('#local-password').fill(localPassword)
+  await page.getByRole('button', { name: '打开旧本机账号', exact: true }).click()
   await page.getByRole('heading', { name: '本机账号：测试玩家甲' }).waitFor()
   assert.equal((await read()).id, first.id)
   assert.equal((await read()).xp, 42)
   await page.reload()
   await page.getByRole('heading', { name: '本机账号：测试玩家甲' }).waitFor()
   assert.equal((await read()).drafts['guest-sample'], '# retained guest draft')
-  console.log('✓ 注册、PBKDF2 非明文存储、游客认领、错误密码、双账号隔离、刷新恢复')
+  console.log('✓ 旧 PBKDF2 账号登录、游客原件保留、错误密码、双账号隔离、刷新恢复')
 
   const backup = await page.evaluate(async () => (await window.__cqImport('/src/lib/backup.ts')).exportBackup())
   const validation = await page.evaluate(async () => {

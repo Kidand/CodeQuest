@@ -14,7 +14,7 @@ export default defineConfig(async () => {
   const { cloudflare } = await import('@cloudflare/vite-plugin')
   return {
     base: '/',
-    plugins: [react(), tailwindcss(), sites(), cloudflare({
+    plugins: [react(), tailwindcss(), sites({ mockAuth: false }), cloudflare({
       viteEnvironment: { name: 'server' },
       inspectorPort: false,
       persistState: { path: '.wrangler/state' },

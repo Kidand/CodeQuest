@@ -56,9 +56,9 @@ function AccountCard() {
   return <Card className="flex flex-wrap items-center gap-4 p-5">
     <div className="min-w-0 flex-1">
       <h2 className="font-semibold">{cloud.user ? `你好，${cloud.user.username || cloud.user.email || '学习者'}` : account ? `本机账号：${account.username}` : '正在使用游客存档'}</h2>
-      <p className="mt-1 text-xs leading-6 text-muted">{cloud.user ? `${cloudStatusText[cloud.status]} · 同一账号可在不同设备继续学习` : '本机进度已保留 · 登录云端后可迁移并自动同步'}</p>
+      <p className="mt-1 text-xs leading-6 text-muted">{cloud.user ? `${cloudStatusText[cloud.status]} · 使用相同用户名和密码可在不同设备继续学习` : '本机进度已保留 · 注册或登录网站账号后可迁移并自动同步'}</p>
     </div>
-    <Link to="/account" className="rounded-xl bg-accent-soft px-4 py-2.5 text-sm font-semibold text-accent">{cloud.user ? '云端账号与存档' : '登录云端 / 迁移存档'}</Link>
+    <Link to="/account" className="rounded-xl bg-accent-soft px-4 py-2.5 text-sm font-semibold text-accent">{cloud.user ? '云端账号与存档' : '注册登录 / 迁移存档'}</Link>
     {!cloud.user && account && <Button variant="ghost" onClick={() => void switchAccount(null)}>退出本机账号</Button>}
   </Card>
 }

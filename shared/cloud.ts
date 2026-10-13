@@ -3,8 +3,8 @@ import type { ChallengeRecord, LevelProgress, LevelShape } from '../src/lib/game
 
 // D1 has a 2,000,000-byte row limit. Leave room for the row metadata and encoding.
 export const MAX_CLOUD_BYTES = 1_500_000
-export interface CloudUser { id: string; username: string; email: string }
-export interface CloudSessionResponse { user: CloudUser | null; signInUrl: string; signOutUrl: string }
+export interface CloudUser { id: string; username: string; email?: string }
+export interface CloudSessionResponse { user: CloudUser | null; auth: 'password' }
 export interface CloudStateResponse { user: CloudUser; revision: number; updatedAt: string | null; snapshot: CloudSnapshot | null }
 export interface ProgressData {
   xp: number

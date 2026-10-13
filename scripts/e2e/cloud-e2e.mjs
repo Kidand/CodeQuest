@@ -2,7 +2,7 @@
 import { chromium } from 'playwright-core'
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
-import { pbkdf2Sync } from 'node:crypto'
+import { pbkdf2Sync, randomBytes } from 'node:crypto'
 
 const base = process.env.CQ_TEST_BASE || 'http://127.0.0.1:5173'
 if (!['localhost', '127.0.0.1'].includes(new URL(base).hostname)) throw new Error('This test intentionally replaces its disposable local D1 archive. Use a localhost CQ_TEST_BASE.')
@@ -11,7 +11,9 @@ await fs.mkdir(out, { recursive: true })
 const browser = await chromium.launch({ channel: 'chrome', args: ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'] })
 const errors = []
 const contexts = []
-async function device(viewport = { width: 1365, height: 1000 }, seed = {}, beforeNavigate) {
+const credentials = () => ({ username: `e2e_${randomBytes(8).toString('hex')}`, password: randomBytes(24).toString('base64url'), registered: false })
+const mainIdentity = credentials()
+async function device(viewport = { width: 1365, height: 1000 }, seed = {}, beforeNavigate, identity = mainIdentity) {
   const context = await browser.newContext({ viewport })
   contexts.push(context)
   await context.addInitScript(({ seed }) => {
@@ -30,15 +32,34 @@ async function device(viewport = { width: 1365, height: 1000 }, seed = {}, befor
   await page.goto(`${base}/#/account`)
   await page.locator('main').waitFor()
   await ready(page)
-  if (!beforeNavigate && !(await state(page)).user) {
-    await Promise.all([
-      page.waitForEvent('domcontentloaded'),
-      page.getByRole('link', { name: '使用 ChatGPT 登录云端', exact: true }).click(),
-    ])
-    await page.locator('main').waitFor()
-    await ready(page)
-  }
+  if (identity && !(await state(page)).user) await signIn(page, identity)
   return { context, page }
+}
+async function signIn(page, identity) {
+  const mode = identity.registered ? 'login' : 'register'
+  await page.getByRole('radio', { name: mode === 'register' ? '注册网站账号' : '登录网站账号', exact: true }).click()
+  await page.locator('#cloud-username').fill(identity.username)
+  await page.locator('#cloud-password').fill(identity.password)
+  if (mode === 'register') await page.locator('#cloud-repeat-password').fill(identity.password)
+  await page.getByRole('button', { name: mode === 'register' ? '注册并开启云存档' : '登录并继续学习', exact: true }).click()
+  const deadline = Date.now() + 15_000
+  let confirmedUnsaved = false
+  while (Date.now() < deadline) {
+    if (!confirmedUnsaved && await page.getByTestId('auth-unsaved-confirmation').isVisible()) {
+      await page.getByRole('button', { name: '保留设备副本并继续登录', exact: true }).click()
+      confirmedUnsaved = true
+    }
+    const current = await state(page)
+    if (current.user?.username === identity.username && !['checking', 'syncing', 'expired'].includes(current.status)) break
+    await page.waitForTimeout(100)
+  }
+  await wait(page, s => s.user?.username === identity.username && !['checking', 'syncing', 'expired'].includes(s.status), 'password authentication')
+  identity.registered = true
+}
+async function apiLogin(context, identity) {
+  const response = await context.request.post(`${base}/api/auth/login`, { headers: { origin: new URL(base).origin }, data: { username: identity.username, password: identity.password } })
+  assert.equal(response.status(), 200)
+  return response.json()
 }
 const run = (page, fn, value) => page.evaluate(async ({ source, value }) => {
   const cloud = await window.__cqImport('/src/lib/cloud.ts')
@@ -69,7 +90,13 @@ async function clickAndConfirm(page, name) {
 
 try {
   const a = await device()
-  assert.ok((await state(a.page)).user?.id, 'Sites development authentication must inject the local test user')
+  assert.ok((await state(a.page)).user?.id.startsWith('cqp_'), 'The site must create its own password account')
+  assert.equal(await a.page.getByRole('link', { name: /ChatGPT/ }).count(), 0)
+  assert.equal(await a.page.evaluate(password => Object.values(localStorage).some(value => value.includes(password)), mainIdentity.password), false, 'A cloud password must never enter browser storage')
+  const authCookies = (await a.context.cookies()).filter(cookie => cookie.name === 'cq_dev_session')
+  assert.equal(authCookies.length, 1)
+  assert.ok(authCookies[0].httpOnly && authCookies[0].sameSite === 'Lax')
+  assert.equal(await a.page.evaluate(() => document.cookie.includes('cq_dev_session')), false, 'The session token must not be readable by scripts')
   const first = await run(a.page, async (cloud, store, mock) => {
     const fixture = cloud.captureCloudSnapshot()
     fixture.state = { ...store.initialData(), xp: 142, settings: { ...store.initialData().settings, theme: 'dark', editorFontSize: 17, dailyGoal: 150 }, lastVisited: { levelId: 'algo-search-binary', stage: 'challenge' } }
@@ -153,20 +180,19 @@ try {
   assert.equal((await state(a.page)).snapshot.state.xp, 999)
   console.log('✓ 用户明确选择此设备版本后，其他设备恢复该版本')
 
-  // A 401 must retain the user's pending archive without sending it to guest or
-  // to another authenticated account. The real Worker separately tests identity CAS.
+  // Revoke the browser's actual session cookie, so 401 comes from the real Worker.
   const beforeExpiry = await state(b.page)
-  await b.page.route('**/api/cloud/state', route => route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ error: 'unauthorized' }) }))
+  await b.context.clearCookies()
   await run(b.page, (cloud, store) => { store.useDrafts.getState().setDraft('expired-only', '# retain after expiration'); return cloud.flushCloud() })
   await wait(b.page, s => s.status === 'expired', 'expired session')
   const expired = await state(b.page)
   assert.ok(expired.dirty)
   assert.equal(expired.snapshot.drafts['expired-only'], '# retain after expiration')
   assert.equal(expired.user?.id, beforeExpiry.user.id)
-  await b.page.unroute('**/api/cloud/state')
-  await run(b.page, cloud => cloud.refreshCloud())
+  await signIn(b.page, mainIdentity)
   await saved(b.page)
-  console.log('✓ 登录过期保留原账号未同步队列，重新验证身份后可继续同步')
+  assert.equal((await state(b.page)).snapshot.drafts['expired-only'], '# retain after expiration')
+  console.log('✓ 真实会话失效保留原账号未同步队列，输入同一用户名密码后继续同步')
 
   const localId = 'legacy-e2e-player'
   const localPassword = 'legacy-e2e-password'
@@ -181,10 +207,12 @@ try {
     [`cq-drafts::${localId}`]: { version: 0, state: { drafts: { legacy: '# old local account' } } },
     [`cq-mock::${localId}`]: { version: 1, state: first.mock },
   }
-  const c = await device({ width: 1365, height: 1000 }, seed)
-  for (const [name, xp] of [['游客存档', 123], ['旧本机玩家', 321]]) {
+  const legacyCloudId = 'old-chatgpt-e2e'
+  seed[`cq-cloud-cache::${encodeURIComponent(legacyCloudId)}`] = { user: { id: legacyCloudId, username: '以前云账号', email: 'legacy@example.test' }, revision: 3, updatedAt: new Date().toISOString(), snapshot: { ...structuredClone(first), state: { ...structuredClone(first.state), xp: 654 } } }
+  const c = await device({ width: 1365, height: 1000 }, seed, undefined, credentials())
+  for (const [name, xp] of [['游客存档', 123], ['旧本机账号：旧本机玩家', 321]]) {
     await c.page.getByRole('heading', { name, exact: true }).locator('..').locator('..').getByRole('button', { name: '迁移此存档', exact: true }).click()
-    await c.page.getByRole('button', { name: '确认替换云端存档', exact: true }).click()
+    await c.page.getByRole('button', { name: (await state(c.page)).revision > 0 ? '确认替换云端存档' : '确认迁移到云端', exact: true }).click()
     await saved(c.page)
     assert.equal((await state(c.page)).snapshot.state.xp, xp)
     const preserved = await c.page.evaluate(keys => Object.fromEntries(keys.map(key => [key, JSON.parse(localStorage.getItem(key))])), Object.keys(seed))
@@ -202,12 +230,22 @@ try {
   assert.equal(JSON.stringify((await state(c.page)).snapshot).includes(localAccount.hash), false)
   console.log('✓ 旧版带 exportedAt 的真实 JSON 备份可上传，账号密码不会进入云端学习存档')
 
+  await c.page.locator('input[type=file]').setInputFiles({ name: 'codequest-v1-backup.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ app: 'codequest', version: 1, state: { ...file.state, xp: 543 } })) })
+  await c.page.getByRole('button', { name: '确认替换云端存档', exact: true }).click()
+  await saved(c.page)
+  assert.equal((await state(c.page)).snapshot.state.xp, 543)
+  assert.deepEqual((await state(c.page)).snapshot.drafts, {})
+  await c.page.getByRole('heading', { name: /以前的云存档/ }).locator('..').locator('..').getByRole('button', { name: '迁移此存档', exact: true }).click()
+  await c.page.getByRole('button', { name: '确认替换云端存档', exact: true }).click()
+  await saved(c.page)
+  assert.equal((await state(c.page)).snapshot.state.xp, 654)
+  assert.deepEqual(await c.page.evaluate(key => JSON.parse(localStorage.getItem(key)), `cq-cloud-cache::${encodeURIComponent(legacyCloudId)}`), seed[`cq-cloud-cache::${encodeURIComponent(legacyCloudId)}`])
+  console.log('✓ v1 进度备份与以前 ChatGPT 云存档的本机副本均可迁移，旧缓存原件保留')
+
   let anonymousWrites = 0
   const d = await device({ width: 390, height: 844 }, seed, async context => {
     context.on('request', req => { if (req.url().endsWith('/api/cloud/state') && req.method() === 'PUT') anonymousWrites++ })
-    await context.route('**/api/cloud/session**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ user: null, signInUrl: '/signin-with-chatgpt?return_to=%2F%23%2Faccount', signOutUrl: '/signout-with-chatgpt?return_to=%2F%23%2Faccount' }) }))
-    await context.route('**/api/cloud/state', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{"error":"unauthenticated"}' }))
-  })
+  }, null)
   await run(d.page, async (cloud, store, mock, password) => {
     const accounts = await window.__cqImport('/src/lib/accounts.ts')
     await accounts.loginAccount('旧本机玩家', password)
@@ -216,7 +254,7 @@ try {
   assert.equal((await state(d.page)).snapshot.state.xp, 321)
   assert.equal(anonymousWrites, 0)
   await d.page.goto(`${base}/#/account`)
-  await d.page.getByRole('link', { name: '使用 ChatGPT 登录云端', exact: true }).waitFor()
+  await d.page.locator('#cloud-username').waitFor()
   await d.page.screenshot({ path: `${out}/anonymous-mobile.png`, fullPage: true })
   console.log('✓ 旧本机密码只打开设备存档，不能冒充云端认证身份或产生云端写入')
 
@@ -231,17 +269,15 @@ try {
     window.__oldLogin = accounts.loginAccount('旧本机玩家', password).then(() => ({ ok: true }), error => ({ error: error.message })).finally(() => { crypto.subtle.deriveBits = native })
   }, localPassword)
   await d.page.waitForFunction(() => typeof window.__releaseHash === 'function')
-  const hashRaceUser = { id: 'hash-race-cloud', username: 'New cloud account', email: 'new@example.test' }
+  const hashIdentity = credentials()
+  const hashDevice = await device(undefined, {}, undefined, hashIdentity)
+  const hashRaceUser = (await state(hashDevice.page)).user
   const hashRaceSnapshot = { ...structuredClone(first), state: { ...structuredClone(first.state), xp: 5678 } }
+  await run(hashDevice.page, (cloud, store, mock, fixture) => cloud.migrateCloudSnapshot(fixture), hashRaceSnapshot)
+  await saved(hashDevice.page)
   const hashWrites = []
-  await d.context.unroute('**/api/cloud/session**')
-  await d.context.unroute('**/api/cloud/state')
-  await d.context.route('**/api/cloud/session**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ user: hashRaceUser, signInUrl: '/signin-with-chatgpt', signOutUrl: '/signout-with-chatgpt' }) }))
-  await d.context.route('**/api/cloud/state', route => {
-    const input = route.request().method() === 'PUT' ? route.request().postDataJSON() : null
-    if (input) hashWrites.push(input.snapshot)
-    return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ user: hashRaceUser, revision: input ? input.baseRevision + 1 : 1, updatedAt: new Date().toISOString(), snapshot: input?.snapshot ?? hashRaceSnapshot }) })
-  })
+  d.context.on('request', req => { if (req.url().endsWith('/api/cloud/state') && req.method() === 'PUT') hashWrites.push(req.postDataJSON().snapshot) })
+  await apiLogin(d.context, hashIdentity)
   await run(d.page, cloud => cloud.refreshCloud())
   assert.equal((await state(d.page)).snapshot.state.xp, 5678)
   await d.page.evaluate(async () => { window.__releaseHash(); await window.__oldLogin })
@@ -253,40 +289,37 @@ try {
   assert.ok(hashWrites.every(snapshot => snapshot.state.xp === 5678 && snapshot.drafts.legacy === undefined))
   console.log('✓ 本机密码校验晚于云端登录返回时，不会切回旧存档或写错云账号')
 
-  // Controlled auth responses isolate a race that is difficult to reproduce with
-  // an interactive provider: the old user's PUT completes after a new login.
-  let authId = 'browser-e2e-A'
-  const authUser = id => ({ id, username: id, email: `${id}@example.test` })
-  const rows = new Map(['browser-e2e-A', 'browser-e2e-B'].map((id, i) => [id, { user: authUser(id), revision: 1, updatedAt: new Date().toISOString(), snapshot: { ...structuredClone(first), state: { ...structuredClone(first.state), xp: 201 + i } } }]))
+  // Delay genuine Worker responses while changing a real server-authenticated session.
+  // Authentication is never supplied by a route stub or a development identity header.
+  const raceIdentityA = credentials(), raceIdentityB = credentials()
+  const e = await device(undefined, {}, undefined, raceIdentityA)
+  const raceDeviceB = await device(undefined, {}, undefined, raceIdentityB)
+  const authA = (await state(e.page)).user, authB = (await state(raceDeviceB.page)).user
+  await run(e.page, (cloud, store, mock, fixture) => cloud.migrateCloudSnapshot(fixture), { ...structuredClone(first), state: { ...structuredClone(first.state), xp: 201 } })
+  await run(raceDeviceB.page, (cloud, store, mock, fixture) => cloud.migrateCloudSnapshot(fixture), { ...structuredClone(first), state: { ...structuredClone(first.state), xp: 202 } })
+  await saved(e.page); await saved(raceDeviceB.page)
   const writes = []
   let releaseOld
   const stalled = new Promise(resolve => { releaseOld = resolve })
   let oldRequestSeen = false
   let delayNextGet = false, getRequestSeen = false, releaseGet
   const delayedGet = new Promise(resolve => { releaseGet = resolve })
-  const e = await device({ width: 1365, height: 1000 }, {}, async context => {
-    await context.route('**/api/cloud/session**', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ user: authUser(authId), signInUrl: '/signin-with-chatgpt', signOutUrl: '/signout-with-chatgpt' }) }))
-    await context.route('**/api/cloud/state', async route => {
-      const request = route.request()
-      const id = authId
-      if (request.method() === 'PUT') {
-        const input = request.postDataJSON()
-        writes.push({ id, expectedId: request.headers()['x-codequest-user'], snapshot: input.snapshot })
-        if (id === 'browser-e2e-A') { oldRequestSeen = true; await stalled }
-        const next = { user: authUser(id), revision: input.baseRevision + 1, updatedAt: new Date().toISOString(), snapshot: input.snapshot }
-        rows.set(id, next)
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(next) })
-      } else {
-        const row = structuredClone(rows.get(id))
-        if (delayNextGet) { delayNextGet = false; getRequestSeen = true; await delayedGet }
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(row) })
-      }
-    })
+  await e.context.route('**/api/cloud/state', async route => {
+    const req = route.request()
+    const response = await route.fetch()
+    const body = await response.json()
+    if (req.method() === 'PUT') {
+      const input = req.postDataJSON()
+      writes.push({ id: body.user?.id, expectedId: req.headers()['x-codequest-user'], snapshot: input.snapshot })
+      if (body.user?.id === authA.id && !oldRequestSeen) { oldRequestSeen = true; await stalled }
+    } else if (delayNextGet) { delayNextGet = false; getRequestSeen = true; await delayedGet }
+    await route.fulfill({ response })
   })
   await run(e.page, (cloud, store) => store.useDrafts.getState().setDraft('account-A-private', '# only A'))
   for (let i = 0; i < 50 && !oldRequestSeen; i++) await e.page.waitForTimeout(100)
   assert.ok(oldRequestSeen)
-  authId = 'browser-e2e-B'
+  await apiLogin(e.context, raceIdentityB)
+  const authId = authB.id
   await run(e.page, cloud => cloud.refreshCloud())
   assert.equal((await state(e.page)).user.id, authId)
   assert.equal((await state(e.page)).snapshot.state.xp, 202)
@@ -297,7 +330,8 @@ try {
   await saved(e.page)
   assert.equal((await state(e.page)).user.id, authId)
   assert.equal((await state(e.page)).snapshot.drafts['account-A-private'], undefined)
-  assert.ok(writes.some(write => write.id === 'browser-e2e-B' && write.expectedId === 'browser-e2e-B' && write.snapshot.drafts['account-B-private'] === '# only B' && !write.snapshot.drafts['account-A-private']))
+  assert.ok(writes.some(write => write.id === authB.id && write.expectedId === authB.id && write.snapshot.drafts['account-B-private'] === '# only B' && !write.snapshot.drafts['account-A-private']))
+  assert.equal(await run(e.page, (cloud, store, mock, accountId) => cloud.localMigrationSources().some(source => source.id.includes(accountId) || JSON.stringify(source.snapshot).includes('account-A-private')), authA.id), false, 'Another password account cannot appear in local cloud migration sources')
   console.log('✓ 旧账号请求延迟返回不能污染新账号，新账号编辑仍自动同步到正确身份')
 
   delayNextGet = true
@@ -315,7 +349,7 @@ try {
   assert.equal(cacheRevision, newest.revision)
   console.log('✓ 延迟返回的旧 GET 不会倒退已保存的进度、修订号或离线缓存')
 
-  const f = await device()
+  const f = await device(undefined, {}, undefined, credentials())
   await f.context.route('**/api/cloud/**', route => route.abort('internetdisconnected'))
   await run(f.page, (cloud, store) => { store.useDrafts.getState().setDraft('parent-start', '# pending before duplicate'); return cloud.flushCloud() })
   const popupEvent = f.page.waitForEvent('popup')
@@ -340,6 +374,17 @@ try {
   assert.equal((await state(duplicate)).snapshot.drafts['parent-only'], undefined)
   assert.ok((await state(duplicate)).dirty)
   console.log('✓ window.open 复制标签后两份离线日志独立，任一标签刷新均保留自己的未同步代码')
+
+  await c.page.getByRole('button', { name: '退出云端账号', exact: true }).click()
+  await c.page.getByRole('button', { name: '确认退出云端账号', exact: true }).click()
+  await wait(c.page, s => s.user === null && s.status === 'local', 'logout returns to local archive')
+  const sessionAfterLogout = await c.context.request.get(`${base}/api/cloud/session`)
+  assert.equal((await sessionAfterLogout.json()).user, null)
+  const otherIdentity = credentials()
+  await signIn(c.page, otherIdentity)
+  assert.equal((await state(c.page)).snapshot.state.xp, 0)
+  assert.deepEqual((await state(c.page)).snapshot.drafts, {})
+  console.log('✓ 真实界面退出使服务器会话失效，注册另一账号从空存档开始，不串档')
 
   await a.page.goto(`${base}/#/account`)
   await ready(a.page)

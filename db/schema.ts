@@ -30,8 +30,8 @@ export const userProgress = sqliteTable("user_progress", {
   updatedAt: integer("updated_at").notNull(),
 });
 
-// Original local-password tables remain untouched for migration compatibility.
-// New records are scoped to the Site dispatch identity, never a client user id.
+// Historical tables and ChatGPT archives remain untouched. Cloud records for
+// native password accounts use a separate cqp_ user-id namespace.
 export const cloudStates = sqliteTable("cq_cloud_states", {
   userId: text("user_id").primaryKey(),
   payload: text("payload"),
@@ -50,3 +50,30 @@ export const cloudMutations = sqliteTable("cq_cloud_mutations", {
   primaryKey({ columns: [table.userId, table.mutationId] }),
   index("cq_cloud_mutations_revision_idx").on(table.userId, table.revision),
 ]);
+
+// A fresh schema avoids treating any legacy password material as a new account.
+export const passwordUsers = sqliteTable("cq_password_users", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull(),
+  usernameKey: text("username_key").notNull().unique(),
+  passwordSalt: text("password_salt").notNull(),
+  passwordHash: text("password_hash").notNull(),
+  passwordScheme: text("password_scheme").notNull(),
+  createdAt: integer("created_at").notNull(),
+});
+
+export const passwordSessions = sqliteTable("cq_password_sessions", {
+  tokenHash: text("token_hash").primaryKey(),
+  userId: text("user_id").notNull().references(() => passwordUsers.id, { onDelete: "cascade" }),
+  createdAt: integer("created_at").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+}, (table) => [
+  index("cq_password_sessions_expiry_idx").on(table.expiresAt),
+  index("cq_password_sessions_user_idx").on(table.userId, table.createdAt),
+]);
+
+export const passwordAttempts = sqliteTable("cq_password_attempts", {
+  attemptKey: text("attempt_key").primaryKey(),
+  attempts: integer("attempts").notNull(),
+  expiresAt: integer("expires_at").notNull(),
+}, (table) => [index("cq_password_attempts_expiry_idx").on(table.expiresAt)]);

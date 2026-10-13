@@ -15,6 +15,13 @@
       "when": 1791907538611,
       "tag": "0001_wealthy_stephen_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791935061447,
+      "tag": "0002_chemical_dracula",
+      "breakpoints": true
     }
   ]
 }

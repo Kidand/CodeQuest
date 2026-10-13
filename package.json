@@ -1,7 +1,7 @@
 {
   "name": "codequest",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "type": "module",
   "description": "CodeQuest — 大模型算法工程师面试闯关学习站",
   "scripts": {
@@ -18,7 +18,8 @@
     "db:generate": "drizzle-kit generate",
     "start": "node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js dev --config dist/server/wrangler.json --local --persist-to .wrangler/state --ip 127.0.0.1 --inspector-port 0",
     "test:cloud": "node --import tsx scripts/test-cloud.ts",
-    "test:cloud:e2e": "node scripts/e2e/cloud-e2e.mjs"
+    "test:cloud:e2e": "node scripts/e2e/cloud-e2e.mjs",
+    "test:auth:live": "node --import tsx scripts/smoke-live-auth.ts"
   },
   "dependencies": {
     "@codemirror/lang-python": "^6.2.1",

@@ -14,9 +14,9 @@ type Pending = { baseRevision: number; mutationId: string; snapshot: CloudSnapsh
 type Journal = { userId: string; revision: number; updatedAt: string | null; dirty: boolean; snapshot: CloudSnapshot; editedAt: number; pending?: Pending; conflict?: CloudStateResponse }
 interface CloudView {
   ready: boolean; user: CloudUser | null; status: CloudStatus; dirty: boolean; revision: number; updatedAt: string | null
-  error: string; conflict: CloudStateResponse | null; signInUrl: string; signOutUrl: string
+  error: string; conflict: CloudStateResponse | null
 }
-export const useCloud = create<CloudView>(() => ({ ready: false, user: null, status: 'checking', dirty: false, revision: 0, updatedAt: null, error: '', conflict: null, signInUrl: '/signin-with-chatgpt?return_to=%2F%23%2Faccount', signOutUrl: '/signout-with-chatgpt?return_to=%2F%23%2Faccount' }))
+export const useCloud = create<CloudView>(() => ({ ready: false, user: null, status: 'checking', dirty: false, revision: 0, updatedAt: null, error: '', conflict: null }))
 export const cloudStorageId = (id: string) => `cloud:${encodeURIComponent(id)}`
 const cacheKey = (id: string) => `cq-cloud-cache::${encodeURIComponent(id)}`
 const journalPrefix = (id: string) => `cq-cloud-journal::${encodeURIComponent(id)}::`
@@ -34,7 +34,9 @@ let refreshing: Promise<void> | null = null
 let initialization: Promise<void> | null = null
 let epoch = 0
 let inheritedJournal: { key: string; value: string } | null = null
-let navigatingAuth = false
+let authChanging = false
+let authGeneration = 0
+let authTask = false
 function clearInheritedJournal() {
   if (!inheritedJournal) return
   try {
@@ -117,6 +119,7 @@ function onEdit() {
   if (same(snapshot, journal.snapshot)) return
   journal.snapshot = snapshot; journal.dirty = true; journal.editedAt = Date.now()
   if (!persistJournal()) return
+  if (authChanging) return
   publish(journal.conflict ? 'conflict' : useCloud.getState().status === 'expired' ? 'expired' : navigator.onLine ? 'syncing' : 'offline')
   clearTimeout(timer)
   timer = setTimeout(() => { void flushCloud() }, 650)
@@ -176,7 +179,7 @@ async function activateUser(user: CloudUser) {
   await switchStorageAccount(cloudStorageId(user.id))
   journal = restored ?? { userId: user.id, revision: 0, updatedAt: null, dirty: false, snapshot: captureCloudSnapshot(), editedAt: Date.now() }
   if (restored) applySnapshot(restored.snapshot)
-  try { localStorage.setItem('cq-cloud-last-user', json(user)); sessionStorage.setItem('cq-cloud-active', user.id) } catch { /* Reported by the journal write below. */ }
+  try { localStorage.setItem('cq-cloud-last-user', json({ ...user, auth: 'password' })); sessionStorage.setItem('cq-cloud-active', user.id) } catch { /* Reported by the journal write below. */ }
   if (persistJournal()) publish(restored?.conflict ? 'conflict' : 'checking')
 }
 async function activateLocal() {
@@ -188,18 +191,24 @@ async function activateLocal() {
   sessionStorage.removeItem('cq-cloud-active')
 }
 async function refreshInternal() {
+  const authentication = authGeneration
   try {
-    const { response, body } = await request('/api/cloud/session?returnTo=%2F%23%2Faccount')
+    const { response, body } = await request('/api/cloud/session')
+    if (authentication !== authGeneration || authChanging) return
     if (!response.ok) throw new Error(body.message || '暂时无法连接云端')
     const session = body as CloudSessionResponse
-    useCloud.setState({ signInUrl: session.signInUrl, signOutUrl: session.signOutUrl })
     if (!session.user) {
       if (useCloud.getState().user) { expired(); return }
       if (!useCloud.getState().ready) await activateLocal()
       else useCloud.setState({ status: 'local', error: '' })
       return
     }
-    if (session.user.id !== useCloud.getState().user?.id) await activateUser(session.user)
+    if (session.auth !== 'password' || !session.user.id.startsWith('cqp_')) throw new Error('网站账号服务暂时不可用，请稍后重试。')
+    if (session.user.id !== useCloud.getState().user?.id) {
+      if (journal && !persistJournal()) return
+      useCloud.setState({ ready: false })
+      await activateUser(session.user)
+    }
     else useCloud.setState({ user: session.user })
     const id = session.user.id, generation = epoch
     const remote = await request('/api/cloud/state', {}, id)
@@ -210,20 +219,22 @@ async function refreshInternal() {
     acceptRemote(remote.body)
     if (journal?.dirty && !journal.conflict) await flushCloud()
   } catch (e) {
+    if (authentication !== authGeneration || authChanging) return
     if (journal) {
       const message = (e as Error).message || ''
       if (/存储|格式|载入/.test(message)) publish('error', message)
       else publish('offline', '暂时无法连接云端，进度保留在此设备，联网后会重试。')
     }
     else {
-      let previous: CloudUser | null = null
+      let previous: (CloudUser & { auth?: string }) | null = null
       try { previous = JSON.parse(localStorage.getItem('cq-cloud-last-user') || 'null') } catch { /* No cached account. */ }
-      if (previous?.id) { await activateUser(previous); publish('offline', '暂时离线，正在使用该账号的设备存档。重新连接后会核对身份并同步。') }
+      if (previous?.auth === 'password' && previous.id?.startsWith('cqp_')) { await activateUser(previous); publish('offline', '暂时离线，正在使用该网站账号的设备存档。重新连接后会核对身份并同步。') }
       else useCloud.setState({ status: 'local', error: '暂时无法连接云端，可以先在本机学习，稍后登录迁移。' })
     }
-  } finally { useCloud.setState({ ready: true }) }
+  } finally { if (authentication === authGeneration && !authChanging) useCloud.setState({ ready: true }) }
 }
 export function refreshCloud() {
+  if (authChanging) return Promise.resolve()
   if (!refreshing) refreshing = refreshInternal().finally(() => { refreshing = null })
   return refreshing
 }
@@ -235,12 +246,13 @@ export function initializeCloud() {
     window.addEventListener('focus', () => { void refreshCloud() })
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') void refreshCloud() })
     window.addEventListener('storage', (e) => { if (e.key === 'cq-cloud-auth-change' || e.key?.startsWith('cq-cloud-cache::')) void refreshCloud() })
-    window.addEventListener('beforeunload', (e) => { if (journal?.dirty) { persistJournal(); if (!navigatingAuth) { e.preventDefault(); e.returnValue = '' } } })
+    window.addEventListener('beforeunload', (e) => { if (journal?.dirty) { persistJournal(); e.preventDefault(); e.returnValue = '' } })
     initialization = refreshCloud()
   }
   return initialization
 }
 async function flushInternal(): Promise<boolean> {
+  if (authChanging) return false
   if (!journal || !useCloud.getState().user) return true
   if (!navigator.onLine) { publish('offline'); return false }
   if (journal.conflict) { publish('conflict'); return false }
@@ -287,7 +299,7 @@ export function flushCloud(): Promise<boolean> {
     const startedId = journal?.userId
     flight = flushInternal().finally(() => {
       flight = null
-      if (journal?.dirty && journal.userId !== startedId && !journal.conflict && useCloud.getState().status !== 'expired') timer = setTimeout(() => { void flushCloud() }, 0)
+      if (!authChanging && journal?.dirty && journal.userId !== startedId && !journal.conflict && useCloud.getState().status !== 'expired') timer = setTimeout(() => { void flushCloud() }, 0)
     })
   }
   return flight
@@ -338,18 +350,129 @@ export interface LocalMigrationSource { id: string; label: string; snapshot: Clo
 export function localMigrationSources(): LocalMigrationSource[] {
   let accounts: ReturnType<typeof readAccounts> = []
   try { accounts = readAccounts() } catch { /* The guest and exported JSON can still be recovered. */ }
-  return [{ id: null, username: '游客存档' }, ...accounts].flatMap<LocalMigrationSource>((account) => {
+  const local = [{ id: null, username: '游客存档' }, ...accounts].flatMap<LocalMigrationSource>((account) => {
     const keys = ['cq-progress', 'cq-drafts', 'cq-mock'].map((base) => accountKey(base, account.id))
     try {
       if (!keys.some((key) => localStorage.getItem(key))) return []
       const read = (key: string) => JSON.parse(localStorage.getItem(key) || 'null')?.state
       const snapshot = normalizeCloudSnapshot({ app: 'codequest', version: 2, state: parseProgress(read(keys[0]) ?? initialData()), drafts: read(keys[1])?.drafts ?? {}, mock: read(keys[2]) ?? emptyCloudSnapshot().mock })
-      return [{ id: account.id ?? 'guest', label: account.username, snapshot }]
+      return [{ id: account.id ?? 'guest', label: account.id ? `旧本机账号：${account.username}` : account.username, snapshot }]
     } catch (e) { return [{ id: account.id ?? 'guest', label: account.username, snapshot: null, error: (e as Error).message }] }
   })
+  const previousCloud: LocalMigrationSource[] = []
+  const seen = new Set<string>()
+  const activeId = useCloud.getState().user?.id
+  try {
+    // Older provider accounts are archives only. A matching username never grants
+    // access to that server identity, and migration never deletes the source keys.
+    const keys = Object.keys(localStorage).filter((key) => key.startsWith('cq-cloud-cache::') || key.startsWith('cq-cloud-journal::')).sort((a, b) => Number(b.startsWith('cq-cloud-journal::')) - Number(a.startsWith('cq-cloud-journal::')))
+    for (const key of keys) {
+      let label = '以前的云存档（此设备副本）'
+      try {
+        const value = JSON.parse(localStorage.getItem(key)!)
+        const id = value.userId ?? value.user?.id
+        if (typeof id !== 'string' || id.startsWith('cqp_') || id === activeId || !value.snapshot) continue
+        const cached = JSON.parse(localStorage.getItem(cacheKey(id)) || 'null')
+        const name = value.user?.username || cached?.user?.username
+        label += name ? ` · ${name}` : ''
+        label += value.dirty ? ' · 尚未同步的版本' : ' · 已保存的版本'
+        const snapshot = normalizeCloudSnapshot(value.snapshot)
+        const fingerprint = `${id}:${stable(snapshot)}`
+        if (seen.has(fingerprint)) continue
+        seen.add(fingerprint)
+        previousCloud.push({ id: key, label, snapshot })
+      } catch (e) { previousCloud.push({ id: key, label, snapshot: null, error: `此副本暂时无法读取：${(e as Error).message}` }) }
+    }
+  } catch { /* JSON imports remain available when storage access is blocked. */ }
+  return [...local, ...previousCloud]
 }
 export const cloudStatusText: Record<CloudStatus, string> = { checking: '正在连接云端', local: '仅本机保存', saved: '已保存到云端', syncing: '正在同步', offline: '离线 · 等待同步', conflict: '存档冲突 · 需要选择', expired: '登录已失效', error: '同步需要处理' }
-export function announceCloudAuthChange() { navigatingAuth = true; try { localStorage.setItem('cq-cloud-auth-change', String(Date.now())) } catch { /* Top-level authentication can proceed without browser storage. */ } }
+export function announceCloudAuthChange() { try { localStorage.setItem('cq-cloud-auth-change', `${Date.now()}:${crypto.randomUUID()}`) } catch { /* Other tabs also recheck on focus. */ } }
+
+export class CloudUnsavedChangesError extends Error {
+  constructor() { super('当前账号还有未同步的进度。请先下载备份，或确认保留此设备副本后继续。'); this.name = 'CloudUnsavedChangesError' }
+}
+async function prepareAuthentication(allowUnsaved: boolean) {
+  // Drain the current coordinator before changing its cookie. A late GET/PUT may
+  // update only its original account; no previous user's pending upload is reused.
+  if (refreshing) await refreshing
+  await flushCloud()
+  if (refreshing) await refreshing
+  if (journal?.dirty && !allowUnsaved) throw new CloudUnsavedChangesError()
+  if (journal && !persistJournal()) throw new Error('无法安全保留设备存档，请先下载备份并清理浏览器空间。')
+  authChanging = true; authGeneration++; epoch++; clearTimeout(timer)
+}
+function resumeAfterAuthentication() {
+  if (!journal?.dirty || journal.conflict || useCloud.getState().status === 'expired') return
+  publish(navigator.onLine ? 'syncing' : 'offline')
+  clearTimeout(timer)
+  timer = setTimeout(() => { void flushCloud() }, 650)
+}
+export async function authenticateCloud(mode: 'login' | 'register', username: string, password: string, allowUnsaved = false) {
+  username = username.trim().normalize('NFKC')
+  if (!/^[\p{Script=Han}A-Za-z0-9_-]{2,24}$/u.test(username)) throw new Error('用户名需为 2–24 个汉字、英文字母、数字、下划线或短横线。')
+  if (Array.from(password).length < 8 || Array.from(password).length > 128) throw new Error('密码需为 8–128 个字符。')
+  if (authTask) throw new Error('正在处理账号，请稍候。')
+  authTask = true
+  let checkSession = false
+  try {
+    await prepareAuthentication(allowUnsaved)
+    let result: Awaited<ReturnType<typeof request>>
+    try { result = await request(`/api/auth/${mode}`, { method: 'POST', body: json({ username, password }) }) }
+    catch {
+      checkSession = true
+      if (journal) expired('账号请求的结果尚未确认，设备存档已保留。请联网后核对登录状态。')
+      throw new Error(mode === 'register' ? '连接中断，注册可能已经成功。请恢复网络后尝试用刚才的用户名和密码登录，勿重复创建账号。' : '连接中断，登录结果尚未确认。请恢复网络后重试，设备存档已保留。')
+    }
+    const { response, body } = result
+    if (!response.ok) throw new Error(body.message || '账号操作失败，请稍后重试。')
+    if (body.auth !== 'password' || !body.user?.id?.startsWith('cqp_')) throw new Error('账号响应无法确认，请重新登录。')
+    checkSession = true
+    // Edits made while the network request ran still belong to the old journal.
+    if (journal && !persistJournal()) throw new Error('账号已登录，但无法保留原设备存档。请先下载备份后重新登录。')
+    useCloud.setState({ ready: false })
+    await activateUser(body.user as CloudUser)
+    announceCloudAuthChange()
+  } finally {
+    const wasChanging = authChanging
+    authChanging = false
+    try {
+      if (checkSession) await refreshCloud()
+      else if (wasChanging) resumeAfterAuthentication()
+    } finally { useCloud.setState({ ready: true }); authTask = false }
+  }
+}
+export async function logoutCloud(allowUnsaved = false) {
+  if (authTask) throw new Error('正在处理账号，请稍候。')
+  authTask = true
+  let checkSession = false
+  try {
+    await prepareAuthentication(allowUnsaved)
+    let result: Awaited<ReturnType<typeof request>>
+    try { result = await request('/api/auth/logout', { method: 'POST', body: '{}' }, useCloud.getState().user?.id) }
+    catch {
+      if (journal) expired('退出结果尚未确认。设备存档已保留，请联网后重试退出。')
+      throw new Error('网络中断，无法确认是否已退出。请恢复网络后重试。')
+    }
+    if (!result.response.ok) {
+      if (result.body.error === 'identity_changed') {
+        checkSession = true
+        if (journal) expired('另一标签页已切换网站账号。原设备存档已保留，正在核对当前账号。')
+      }
+      throw new Error(result.body.message || '退出失败，请重试。')
+    }
+    if (journal && !persistJournal()) throw new Error('已退出网站账号，但设备存档无法保存。请立即下载当前进度备份。')
+    useCloud.setState({ ready: false })
+    try { localStorage.removeItem('cq-cloud-last-user') } catch { /* Login credentials are only in the revoked HttpOnly cookie. */ }
+    await activateLocal()
+    announceCloudAuthChange()
+  } finally {
+    const wasChanging = authChanging
+    authChanging = false
+    try { if (checkSession) await refreshCloud(); else if (wasChanging) resumeAfterAuthentication() }
+    finally { authTask = false; useCloud.setState({ ready: true }) }
+  }
+}
 
 export function cloudRecoveryBackups(): { id: string; label: string; snapshot: CloudSnapshot }[] {
   const id = useCloud.getState().user?.id
